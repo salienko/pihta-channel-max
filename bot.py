@@ -175,12 +175,12 @@ async def handle(channel, update):
                                        if error.status == 400 else 'Сервис обновляется. Попробуйте через минуту.')
             return
         if callback_id:
-            if screen.get('notice'):
-                try:
-                    await channel.api.answer(callback_id, notification=screen['notice'])
-                except MaxApiError as error:
-                    log.warning('callback answer failed: %s', error)
-        elif screen.get('notice'):
+            try:
+                await channel.api.answer(callback_id)
+            except MaxApiError as error:
+                log.warning('callback answer failed: %s', error)
+        # Notice goes to the chat as its own message, the same as for plain text input.
+        if screen.get('notice'):
             await channel.api.send(user_id=user_id, text=screen['notice'])
         if screen.get('nothing'):
             return

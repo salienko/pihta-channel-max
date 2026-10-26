@@ -145,7 +145,9 @@ class Endpoints(unittest.IsolatedAsyncioTestCase):
             headers={'X-Max-Bot-Api-Secret': 'wh-secret'})
         self.assertEqual(response.status, 200)
         self.assertEqual(self.core.calls[-1], ('screen', 5, 'begin'))
-        self.assertEqual(self.api.answers[-1], {'id': 'cb1', 'notification': 'Готово'})
+        # спиннер гасим пустым ответом, а плашка приходит сообщением в чат
+        self.assertEqual(self.api.answers[-1], {'id': 'cb1', 'notification': None})
+        self.assertEqual(self.api.sent[-1]['text'], 'Готово')
         self.assertEqual(self.api.edits[-1]['message_id'], 'm9')
 
     async def test_deliver_requires_core_token(self):
@@ -171,7 +173,9 @@ class CallbackWithoutNotice(unittest.IsolatedAsyncioTestCase):
                   'callback': {'callback_id': 'cb1', 'payload': 'begin', 'user': {'user_id': 5},
                                'message': {'body': {'mid': 'm1'}}}}
         await channel_bot.handle(self.channel, update)
-        self.assertEqual(self.api.answers, [])
+        # ответ нужен только чтобы снять спиннер, текста в нём нет
+        self.assertEqual(self.api.answers, [{'id': 'cb1', 'notification': None}])
+        self.assertFalse([m for m in self.api.sent if m['text']])
         self.assertEqual(self.api.edits[-1]['message_id'], 'm1')
 
     async def test_failed_answer_still_draws_screen(self):
