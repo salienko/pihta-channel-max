@@ -11,7 +11,11 @@ class FakeApi:
     def __init__(self):
         self.sent, self.edits, self.answers, self.commands, self.subscribed = [], [], [], None, None
 
+    error = None
+
     async def send(self, *, user_id=None, chat_id=None, text=None, attachments=None, notify=True):
+        if self.error:
+            raise self.error
         self.sent.append({'user_id': user_id, 'text': text, 'attachments': attachments})
         return {'ok': True}
 
@@ -153,6 +157,18 @@ class Endpoints(unittest.IsolatedAsyncioTestCase):
     async def test_deliver_requires_core_token(self):
         response = await self.client.post('/deliver', json={'external_id': 5, 'text': 'привет'})
         self.assertEqual(response.status, 401)
+
+    async def test_deliver_marks_unknown_recipient_permanent(self):
+        self.api.error = channel_bot.MaxApiError(400, 'proto.payload', 'user not found')
+        response = await self.client.post('/deliver', json={'external_id': 5, 'text': 'x'},
+                                          headers={'X-Core-Token': 'core-secret'})
+        self.assertEqual(response.status, 410)
+
+    async def test_deliver_keeps_server_errors_retryable(self):
+        self.api.error = channel_bot.MaxApiError(500, 'internal', 'boom')
+        response = await self.client.post('/deliver', json={'external_id': 5, 'text': 'x'},
+                                          headers={'X-Core-Token': 'core-secret'})
+        self.assertEqual(response.status, 502)
 
     async def test_deliver_sends_text(self):
         response = await self.client.post('/deliver', json={'external_id': 5, 'text': 'привет'},

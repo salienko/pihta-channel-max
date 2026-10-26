@@ -146,8 +146,12 @@ def build_app(channel, core_token, webhook_secret, webhook_url='', api=None):
         except MaxApiError as error:
             if error.status == 429:
                 return web.json_response({'error': 'rate_limited', 'retry_after': 30}, status=429)
-            log.error('delivery failed: %s', error)
-            return web.json_response({'error': 'send_failed'}, status=502)
+            # 400/403/404 mean the recipient is unknown to MAX or has blocked the bot:
+            # the core must stop retrying instead of hammering the queue forever.
+            permanent = error.status in (400, 403, 404)
+            log.error('delivery failed: %s permanent=%s', error, permanent)
+            return web.json_response({'error': 'send_failed', 'permanent': permanent},
+                                     status=410 if permanent else 502)
         return web.json_response({'ok': True})
 
     app.add_routes([web.get('/health', health), web.post('/webhook', webhook), web.post('/deliver', deliver)])
