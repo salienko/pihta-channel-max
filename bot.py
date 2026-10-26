@@ -136,9 +136,13 @@ def build_app(channel, core_token, webhook_secret, webhook_url='', api=None):
             text = str(body['text'])
         except (KeyError, TypeError, ValueError):
             return web.json_response({'error': 'external_id and text required'}, status=400)
+        rows = body.get('rows') or []
+        markup = attachments({'rows': rows}) if rows else None
         try:
-            for part in chunks(text):
-                await channel.api.send(user_id=user_id, text=part)
+            parts = chunks(text)
+            for index, part in enumerate(parts):
+                await channel.api.send(user_id=user_id, text=part,
+                                       attachments=markup if index == len(parts) - 1 else None)
         except MaxApiError as error:
             if error.status == 429:
                 return web.json_response({'error': 'rate_limited', 'retry_after': 30}, status=429)
