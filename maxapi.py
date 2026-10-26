@@ -115,6 +115,9 @@ class MaxApi:
                                    json=body)
 
     async def answer(self, callback_id, *, notification=None, message=None):
+        # MAX rejects an empty answer: `message` or `notification` is required.
+        if notification is None and message is None:
+            return {}
         body = {}
         if notification is not None:
             body['notification'] = notification

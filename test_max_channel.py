@@ -157,3 +157,33 @@ class Endpoints(unittest.IsolatedAsyncioTestCase):
                                           headers={'X-Core-Token': 'core-secret'})
         self.assertEqual(response.status, 200)
         self.assertEqual(self.api.sent[-1], {'user_id': 5, 'text': 'привет', 'attachments': None})
+
+class CallbackWithoutNotice(unittest.IsolatedAsyncioTestCase):
+    """Regression: an empty callback answer must not break the screen."""
+
+    async def asyncSetUp(self):
+        self.api = FakeApi()
+        self.core = FakeCore(screen={'text': 'Экран', 'rows': [], 'notice': None})
+        self.channel = channel_bot.Channel(self.api, self.core)
+
+    async def test_no_answer_request_when_notice_empty(self):
+        update = {'update_type': 'message_callback',
+                  'callback': {'callback_id': 'cb1', 'payload': 'begin', 'user': {'user_id': 5},
+                               'message': {'body': {'mid': 'm1'}}}}
+        await channel_bot.handle(self.channel, update)
+        self.assertEqual(self.api.answers, [])
+        self.assertEqual(self.api.edits[-1]['message_id'], 'm1')
+
+    async def test_failed_answer_still_draws_screen(self):
+        class FailingAnswer(FakeApi):
+            async def answer(self, callback_id, *, notification=None, message=None):
+                raise channel_bot.MaxApiError(400, 'proto.payload', 'Invalid request')
+
+        api = FailingAnswer()
+        channel = channel_bot.Channel(api, FakeCore(screen={'text': 'Экран', 'rows': [],
+                                                            'notice': 'Готово'}))
+        update = {'update_type': 'message_callback',
+                  'callback': {'callback_id': 'cb2', 'payload': 'home', 'user': {'user_id': 5},
+                               'message': {'body': {'mid': 'm2'}}}}
+        await channel_bot.handle(channel, update)
+        self.assertEqual(api.edits[-1]['message_id'], 'm2')
