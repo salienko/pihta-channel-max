@@ -96,10 +96,18 @@ class Updates(unittest.TestCase):
         self.assertEqual(channel_bot.parse_update(update), ('contact', 7, '+79812440050', None, None))
 
     def test_callback(self):
+        # В MAX исходное сообщение приходит рядом с callback, а не внутри него.
         update = {'update_type': 'message_callback',
+                  'message': {'body': {'mid': 'm3'}},
                   'callback': {'callback_id': 'cb1', 'payload': 'begin',
-                               'user': {'user_id': 9}, 'message': {'body': {'mid': 'm3'}}}}
+                               'user': {'user_id': 9}}}
         self.assertEqual(channel_bot.parse_update(update), ('callback', 9, 'begin', 'm3', 'cb1'))
+
+    def test_callback_with_nested_message_still_parsed(self):
+        update = {'update_type': 'message_callback',
+                  'callback': {'callback_id': 'cb2', 'payload': 'begin',
+                               'user': {'user_id': 9}, 'message': {'body': {'mid': 'm4'}}}}
+        self.assertEqual(channel_bot.parse_update(update), ('callback', 9, 'begin', 'm4', 'cb2'))
 
     def test_bot_started(self):
         update = {'update_type': 'bot_started', 'user': {'user_id': 11}}
@@ -144,8 +152,8 @@ class Endpoints(unittest.IsolatedAsyncioTestCase):
     async def test_callback_edits_and_answers(self):
         response = await self.client.post('/webhook', json={
             'update_type': 'message_callback',
-            'callback': {'callback_id': 'cb1', 'payload': 'begin', 'user': {'user_id': 5},
-                         'message': {'body': {'mid': 'm9'}}}},
+            'message': {'body': {'mid': 'm9'}},
+            'callback': {'callback_id': 'cb1', 'payload': 'begin', 'user': {'user_id': 5}}},
             headers={'X-Max-Bot-Api-Secret': 'wh-secret'})
         self.assertEqual(response.status, 200)
         self.assertEqual(self.core.calls[-1], ('screen', 5, 'begin'))
@@ -186,8 +194,8 @@ class CallbackWithoutNotice(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_answer_request_when_notice_empty(self):
         update = {'update_type': 'message_callback',
-                  'callback': {'callback_id': 'cb1', 'payload': 'begin', 'user': {'user_id': 5},
-                               'message': {'body': {'mid': 'm1'}}}}
+                  'message': {'body': {'mid': 'm1'}},
+                  'callback': {'callback_id': 'cb1', 'payload': 'begin', 'user': {'user_id': 5}}}
         await channel_bot.handle(self.channel, update)
         # ответ нужен только чтобы снять спиннер, текста в нём нет
         self.assertEqual(self.api.answers, [{'id': 'cb1', 'notification': None}])

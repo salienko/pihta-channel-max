@@ -61,6 +61,7 @@ class Channel:
             except MaxApiError as error:
                 if error.status not in (400, 404):
                     raise
+                log.warning('edit failed (%s), sending a new message: %s', error.status, error)
         parts = chunks(text)
         for index, part in enumerate(parts):
             last = index == len(parts) - 1
@@ -90,7 +91,9 @@ def parse_update(update):
         callback = update.get('callback') or {}
         user_id = (callback.get('user') or {}).get('user_id')
         payload = callback.get('payload') or 'home'
-        message = callback.get('message') or {}
+        # В MAX исходное сообщение лежит рядом с callback (update.message), а не внутри
+        # него. Без этого mid терялся и вместо правки сообщения уходило новое.
+        message = update.get('message') or callback.get('message') or {}
         message_id = (message.get('body') or {}).get('mid')
         if not user_id:
             return None
