@@ -4,8 +4,11 @@ import hmac
 import logging
 import os
 import re
+import socket
+import time
 from pathlib import Path
 
+import aiohttp
 from aiohttp import web
 
 from core_client import Core, CoreError
@@ -129,6 +132,68 @@ def build_app(channel, core_token, webhook_secret, webhook_url='', api=None):
                 log.exception('update failed: %s', str(update)[:200])
         return web.json_response({'ok': True})
 
+    async def netprobe(request):
+        """Диагностика сети контейнера: видно ли ядро напрямую, без публичного домена.
+
+        Закрыто токеном ядра (как /deliver): снаружи без токена недоступно.
+        Возвращает DNS/TCP/HTTP-замеры до перечисленных хостов и, для сравнения,
+        до публичного адреса ядра.
+        """
+        supplied = request.headers.get('X-Core-Token', '')
+        if not core_token or not hmac.compare_digest(supplied, core_token):
+            return web.json_response({'error': 'unauthorized'}, status=401)
+        hosts = [item.strip() for item in request.query.get('hosts', '').split(',') if item.strip()][:20]
+        port = int(request.query.get('port', '3000'))
+        path = request.query.get('path', '/health')
+        results = []
+        for host in hosts:
+            item = {'host': host}
+            started = time.perf_counter()
+            try:
+                info = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+                item['dns_ms'] = round((time.perf_counter() - started) * 1000, 1)
+                item['ip'] = info[0][4][0]
+            except Exception as error:
+                item['dns_error'] = str(error)[:100]
+                results.append(item)
+                continue
+            started = time.perf_counter()
+            try:
+                reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), 3)
+                item['tcp_ms'] = round((time.perf_counter() - started) * 1000, 1)
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+            except Exception as error:
+                item['tcp_error'] = str(error)[:100]
+                results.append(item)
+                continue
+            started = time.perf_counter()
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
+                    async with session.get(f'http://{host}:{port}{path}') as response:
+                        await response.read()
+                        item['http_status'] = response.status
+                item['http_ms'] = round((time.perf_counter() - started) * 1000, 1)
+            except Exception as error:
+                item['http_error'] = str(error)[:100]
+            results.append(item)
+        # Для сравнения: сколько занимает тот же запрос по публичному адресу ядра.
+        public = {'host': getattr(channel.core, 'base', '')}
+        if public['host']:
+            started = time.perf_counter()
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                    async with session.get(channel.core.base + path) as response:
+                        await response.read()
+                        public['http_status'] = response.status
+                public['http_ms'] = round((time.perf_counter() - started) * 1000, 1)
+            except Exception as error:
+                public['http_error'] = str(error)[:100]
+        return web.json_response({'results': results, 'public_core': public})
+
     async def deliver(request):
         supplied = request.headers.get('X-Core-Token', '')
         if not core_token or not hmac.compare_digest(supplied, core_token):
@@ -157,7 +222,8 @@ def build_app(channel, core_token, webhook_secret, webhook_url='', api=None):
                                      status=410 if permanent else 502)
         return web.json_response({'ok': True})
 
-    app.add_routes([web.get('/health', health), web.post('/webhook', webhook), web.post('/deliver', deliver)])
+    app.add_routes([web.get('/health', health), web.get('/netprobe', netprobe),
+                    web.post('/webhook', webhook), web.post('/deliver', deliver)])
     return app
 
 

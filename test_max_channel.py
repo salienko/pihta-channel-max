@@ -134,6 +134,22 @@ class Endpoints(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual((await response.json())['service'], 'pihta-channel-max')
 
+    async def test_netprobe_needs_token(self):
+        response = await self.client.get('/netprobe?hosts=localhost&port=1')
+        self.assertEqual(response.status, 401)
+
+    async def test_netprobe_measures_host(self):
+        port = self.client.server.port
+        response = await self.client.get(f'/netprobe?hosts=127.0.0.1&port={port}',
+                                         headers={'X-Core-Token': 'core-secret'})
+        self.assertEqual(response.status, 200)
+        body = await response.json()
+        item = body['results'][0]
+        self.assertEqual(item['host'], '127.0.0.1')
+        self.assertEqual(item['ip'], '127.0.0.1')
+        self.assertEqual(item['http_status'], 200)
+        self.assertLess(item['http_ms'], 2000)
+
     async def test_webhook_rejects_wrong_secret(self):
         response = await self.client.post('/webhook', json={'update_type': 'bot_started',
                                                            'user': {'user_id': 1}},
