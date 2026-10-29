@@ -23,6 +23,26 @@ def ssl_context():
     return ctx
 
 
+def upload_token(data):
+    """Find the media token in an upload response.
+
+    MAX answers either flat ({"token": "..."}) or nested under the media type,
+    e.g. {"photos": {"photoIds": {"token": "..."}}}; the shape has changed
+    between API versions, so look for the first non-empty string named token.
+    """
+    if not isinstance(data, dict):
+        return None
+    token = data.get('token')
+    if isinstance(token, str) and token:
+        return token
+    for value in data.values():
+        if isinstance(value, dict):
+            found = upload_token(value)
+            if found:
+                return found
+    return None
+
+
 class MaxApiError(Exception):
     def __init__(self, status, code, message):
         super().__init__(f'{status} {code}: {message}')
@@ -135,18 +155,20 @@ class MaxApi:
             raise ValueError('bad upload type')
         endpoint = await self._request('POST', '/uploads',
                                        params={'type': media_type})
-        token = endpoint.get('token')
-        if not token:
+        token = upload_token(endpoint)
+        if not token and endpoint.get('url'):
             upload_url = endpoint['url']
             s = await self.session()
             form = aiohttp.FormData()
             form.add_field('data', payload, filename=filename)
-            async with s.post(upload_url, data=form) as resp:
+            # The upload host wants the same token as the API itself.
+            async with s.post(upload_url, data=form,
+                              headers={'Authorization': self.token}) as resp:
                 await resp.read()
                 if resp.status != 200:
                     raise MaxApiError(resp.status, 'upload.failed', f'status {resp.status}')
                 try:
-                    token = (await resp.json(content_type=None)).get('token')
+                    token = upload_token(await resp.json(content_type=None))
                 except Exception:
                     token = None
         if not token:

@@ -4,6 +4,7 @@ import unittest
 from aiohttp.test_utils import TestClient, TestServer
 
 import bot as channel_bot
+import maxapi
 from render import attachments, button, chunks, markup
 
 
@@ -231,3 +232,18 @@ class CallbackWithoutNotice(unittest.IsolatedAsyncioTestCase):
                                'message': {'body': {'mid': 'm2'}}}}
         await channel_bot.handle(channel, update)
         self.assertEqual(api.edits[-1]['message_id'], 'm2')
+
+
+class UploadTokenTest(unittest.TestCase):
+    """MAX returns the media token flat or nested under the media type."""
+
+    def test_flat_token(self):
+        self.assertEqual(maxapi.upload_token({'token': 'abc'}), 'abc')
+
+    def test_nested_photo_ids(self):
+        body = {'photos': {'photoIds': {'token': 'mediafile-token'}}}
+        self.assertEqual(maxapi.upload_token(body), 'mediafile-token')
+
+    def test_missing_token(self):
+        self.assertIsNone(maxapi.upload_token({'url': 'https://iu.oneme.ru/uploadImage'}))
+        self.assertIsNone(maxapi.upload_token(None))
